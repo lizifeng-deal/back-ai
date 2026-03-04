@@ -3,7 +3,7 @@ import sys
 import time
 from decimal import Decimal
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "vendor"))
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify,Response
 from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
@@ -19,7 +19,7 @@ class DealLog(db.Model):
     timestamp = db.Column(db.BigInteger, nullable=False)
     remark = db.Column(db.String(255))
     free = db.Column(db.Numeric(18, 8))
-
+    source = db.Column(db.String(100))
     def to_dict(self):
         return {
             "id": self.id,
@@ -28,10 +28,21 @@ class DealLog(db.Model):
             "timestamp": int(self.timestamp),
             "remark": self.remark or "",
             "free": float(self.free) if self.free is not None else None,
+            "source": self.source or None,
         }
 
 with app.app_context():
     db.create_all()
+
+@app.route('/')
+def hello_world():
+    return 'Hello, World!'
+
+@app.route('/custom')
+def custom_response():
+    response = Response('Custom response with headers', status=200)
+    response.headers['X-Custom-Header'] = 'Value'
+    return response
 
 @app.route("/dealLog", methods=["GET"])
 def list_deallog():
@@ -113,4 +124,4 @@ def delete_deallog(entry_id):
     return "", 204
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000)
+    app.run(host="127.0.0.1", port=5000, debug=True, use_reloader=True)
