@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import uuid
 from decimal import Decimal
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "vendor"))
 from flask import Flask, request, jsonify,Response
@@ -19,7 +20,6 @@ class DealLog(db.Model):
     timestamp = db.Column(db.BigInteger, nullable=False)
     remark = db.Column(db.String(255))
     free = db.Column(db.Numeric(18, 8))
-    source = db.Column(db.String(100))
     def to_dict(self):
         return {
             "id": self.id,
@@ -28,7 +28,6 @@ class DealLog(db.Model):
             "timestamp": int(self.timestamp),
             "remark": self.remark or "",
             "free": float(self.free) if self.free is not None else None,
-            "source": self.source or None,
         }
 
 with app.app_context():
@@ -59,16 +58,18 @@ def get_deallog(entry_id):
 @app.route("/dealLog", methods=["POST"])
 def create_deallog():
     data = request.get_json(silent=True) or {}
-    t = data.get("type")
+    t = data.get("type") or "deposit"
     if t not in {"deposit", "withdraw", "delivery_pnl"}:
         return jsonify({"error": "invalid_type"}), 400
-    entry_id = data.get("id")
-    if not entry_id:
-        return jsonify({"error": "id_required"}), 400
-    try:
-        amt = Decimal(str(data.get("amount")))
-    except Exception:
-        return jsonify({"error": "invalid_amount"}), 400
+    entry_id = data.get("id") or ("dl-" + uuid.uuid4().hex[:12])
+    amount_val = data.get("amount")
+    if amount_val is None:
+        amt = Decimal("0")
+    else:
+        try:
+            amt = Decimal(str(amount_val))
+        except Exception:
+            return jsonify({"error": "invalid_amount"}), 400
     ts = data.get("timestamp")
     ts_val = int(ts) if ts is not None else int(time.time() * 1000)
     free_val = data.get("free")
@@ -82,7 +83,7 @@ def create_deallog():
     row = DealLog(id=entry_id, type=t, amount=amt, timestamp=ts_val, remark=remark, free=free_num)
     db.session.add(row)
     db.session.commit()
-    return jsonify(row.to_dict()), 201
+    return jsonify(row.to_dict()), 200
 
 @app.route("/dealLog/<string:entry_id>", methods=["PUT", "PATCH"])
 def update_deallog(entry_id):
@@ -121,7 +122,7 @@ def delete_deallog(entry_id):
         return jsonify({"error": "not_found"}), 404
     db.session.delete(row)
     db.session.commit()
-    return "", 204
+    return "", 200
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True, use_reloader=True)
