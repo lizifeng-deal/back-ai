@@ -1,11 +1,11 @@
 import os
 import sys
-import time
-import uuid
-from decimal import Decimal
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "vendor"))
-from flask import Flask, request, jsonify,Response
+from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import inspect, text
+from deallog_blueprint import create_deallog_blueprint
+from positions_blueprint import create_positions_blueprint
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///app.db"
@@ -20,6 +20,7 @@ class DealLog(db.Model):
     timestamp = db.Column(db.BigInteger, nullable=False)
     remark = db.Column(db.String(255))
     free = db.Column(db.Numeric(18, 8))
+    currency = db.Column(db.String(16))
     def to_dict(self):
         return {
             "id": self.id,
@@ -28,101 +29,50 @@ class DealLog(db.Model):
             "timestamp": int(self.timestamp),
             "remark": self.remark or "",
             "free": float(self.free) if self.free is not None else None,
+            "currency": self.currency or "",
+        }
+
+class Position(db.Model):
+    __tablename__ = "positions"
+    id = db.Column(db.String(64), primary_key=True)
+    name = db.Column(db.String(128), nullable=False)
+    quantity = db.Column(db.Numeric(18, 8), nullable=False)
+    market_value = db.Column(db.Numeric(18, 8), nullable=False)
+    open_price = db.Column(db.Numeric(18, 8), nullable=False)
+    pnl = db.Column(db.Numeric(18, 8), nullable=False)
+    leverage = db.Column(db.Numeric(18, 8))
+    side = db.Column(db.Enum("long", "short", name="position_side"), nullable=False)
+    margin = db.Column(db.Numeric(18, 8))
+    currency = db.Column(db.String(16))
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "quantity": float(self.quantity),
+            "market_value": float(self.market_value),
+            "open_price": float(self.open_price),
+            "pnl": float(self.pnl),
+            "leverage": float(self.leverage) if self.leverage is not None else None,
+            "side": self.side,
+            "margin": float(self.margin) if self.margin is not None else None,
+            "currency": self.currency or "",
         }
 
 with app.app_context():
     db.create_all()
+    insp = inspect(db.engine)
+    tables = insp.get_table_names()
+    if "dealLog" in tables:
+        cols = [c["name"] for c in insp.get_columns("dealLog")]
+        if "currency" not in cols:
+            db.session.execute(text("ALTER TABLE dealLog ADD COLUMN currency VARCHAR(16)"))
+            db.session.commit()
 
-@app.route('/')
-def hello_world():
-    return 'Hello, World!'
-
-@app.route('/custom')
-def custom_response():
-    response = Response('Custom response with headers', status=200)
-    response.headers['X-Custom-Header'] = 'Value'
-    return response
-
-@app.route("/dealLog", methods=["GET"])
-def list_deallog():
-    rows = DealLog.query.order_by(DealLog.timestamp.desc()).all()
-    return jsonify([r.to_dict() for r in rows])
-
-@app.route("/dealLog/<string:entry_id>", methods=["GET"])
-def get_deallog(entry_id):
-    row = DealLog.query.get(entry_id)
-    if not row:
-        return jsonify({"error": "not_found"}), 404
-    return jsonify(row.to_dict())
-
-@app.route("/dealLog", methods=["POST"])
-def create_deallog():
-    data = request.get_json(silent=True) or {}
-    t = data.get("type") or "deposit"
-    if t not in {"deposit", "withdraw", "delivery_pnl"}:
-        return jsonify({"error": "invalid_type"}), 400
-    entry_id = data.get("id") or ("dl-" + uuid.uuid4().hex[:12])
-    amount_val = data.get("amount")
-    if amount_val is None:
-        amt = Decimal("0")
-    else:
-        try:
-            amt = Decimal(str(amount_val))
-        except Exception:
-            return jsonify({"error": "invalid_amount"}), 400
-    ts = data.get("timestamp")
-    ts_val = int(ts) if ts is not None else int(time.time() * 1000)
-    free_val = data.get("free")
-    free_num = None
-    if free_val is not None:
-        try:
-            free_num = Decimal(str(free_val))
-        except Exception:
-            return jsonify({"error": "invalid_free"}), 400
-    remark = data.get("remark")
-    row = DealLog(id=entry_id, type=t, amount=amt, timestamp=ts_val, remark=remark, free=free_num)
-    db.session.add(row)
-    db.session.commit()
-    return jsonify(row.to_dict()), 200
-
-@app.route("/dealLog/<string:entry_id>", methods=["PUT", "PATCH"])
-def update_deallog(entry_id):
-    row = DealLog.query.get(entry_id)
-    if not row:
-        return jsonify({"error": "not_found"}), 404
-    data = request.get_json(silent=True) or {}
-    if "type" in data:
-        if data["type"] not in {"deposit", "withdraw", "delivery_pnl"}:
-            return jsonify({"error": "invalid_type"}), 400
-        row.type = data["type"]
-    if "amount" in data:
-        try:
-            row.amount = Decimal(str(data["amount"]))
-        except Exception:
-            return jsonify({"error": "invalid_amount"}), 400
-    if "timestamp" in data and data["timestamp"] is not None:
-        row.timestamp = int(data["timestamp"])
-    if "remark" in data:
-        row.remark = data["remark"]
-    if "free" in data:
-        if data["free"] is None:
-            row.free = None
-        else:
-            try:
-                row.free = Decimal(str(data["free"]))
-            except Exception:
-                return jsonify({"error": "invalid_free"}), 400
-    db.session.commit()
-    return jsonify(row.to_dict())
-
-@app.route("/dealLog/<string:entry_id>", methods=["DELETE"])
-def delete_deallog(entry_id):
-    row = DealLog.query.get(entry_id)
-    if not row:
-        return jsonify({"error": "not_found"}), 404
-    db.session.delete(row)
-    db.session.commit()
-    return "", 200
+bp = create_deallog_blueprint(db, DealLog)
+app.register_blueprint(bp)
+bp_pos = create_positions_blueprint(db, Position)
+app.register_blueprint(bp_pos)
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True, use_reloader=True)
