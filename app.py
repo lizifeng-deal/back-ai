@@ -75,4 +75,4 @@ bp_pos = create_positions_blueprint(db, Position)
 app.register_blueprint(bp_pos)
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True, use_reloader=True)
+    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=True)

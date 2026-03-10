@@ -1,0 +1,5 @@
+- python3 -m pip install --upgrade pip
+- python3 -m pip install binance-connector
+
+- binance-connector（官方 SDK）→ from binance.api import API 或 from binance.um_futures import UMFutures
+- python-binance（第三方）→ from binance.client import Client
