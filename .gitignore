@@ -3,10 +3,10 @@ vendor/
 __pycache__/
 
 # Debug tools generated files
-debug_tools/**/*_result_*.json
-debug_tools/**/*_result.json
-debug_tools/**/test_output_*.txt
-debug_tools/**/debug_*.log
+# debug_tools/**/*_result_*.json
+# debug_tools/**/*_result.json
+# debug_tools/**/test_output_*.txt
+# debug_tools/**/debug_*.log
 
 # Binance specific
 binance_positions_result.json
