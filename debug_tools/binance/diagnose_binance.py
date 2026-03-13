@@ -2,7 +2,8 @@ import os
 import sys
 import time
 import json
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "vendor"))
+# 修正路径，因为现在在 debug_tools/binance/ 子文件夹中
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "vendor"))
 from binance.api import API
 
 def diagnose_binance_connection():
