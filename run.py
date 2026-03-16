@@ -4,6 +4,10 @@ Flask应用启动文件
 """
 import os
 import sys
+from dotenv import load_dotenv
+
+# 加载.env文件
+load_dotenv()
 
 # 添加vendor目录到Python路径（用于第三方依赖）
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "vendor"))
@@ -28,5 +32,5 @@ if __name__ == "__main__":
         host=host,
         port=port,
         debug=debug,
-        use_reloader=True
+        use_reloader=False
     )

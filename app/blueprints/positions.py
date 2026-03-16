@@ -2,6 +2,7 @@
 持仓蓝图 - 处理持仓管理相关功能
 """
 import os
+import sys
 from flask import Blueprint, request, jsonify
 from app.models.position import Position
 from app import db
@@ -12,6 +13,10 @@ from app.utils.positions_ops import (
     update_position_record,
     delete_position_record
 )
+
+
+# 添加vendor目录到Python路径（用于第三方依赖）
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "vendor"))
 
 # 创建持仓蓝图
 positions_bp = Blueprint("positions", __name__)
