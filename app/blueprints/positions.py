@@ -3,6 +3,7 @@
 """
 import os
 import sys
+import time
 from flask import Blueprint, request, jsonify
 from app.models.position import Position
 from app import db
@@ -39,6 +40,155 @@ def create_position():
     data = request.get_json(silent=True) or {}
     payload, code = create_position_record(Position, db, data)
     return jsonify(payload), code
+
+@positions_bp.route("/positions/batch", methods=["POST"])
+def create_positions_batch():
+    """批量创建合约持仓记录"""
+    data = request.get_json(silent=True) or {}
+    positions_data = data.get("positions", [])
+    
+    if not isinstance(positions_data, list):
+        return jsonify({"error": "positions 字段必须是数组"}), 400
+    
+    if not positions_data:
+        return jsonify({"error": "positions 数组不能为空"}), 400
+    
+    results = []
+    success_count = 0
+    error_count = 0
+    
+    for i, position_data in enumerate(positions_data):
+        try:
+            payload, code = create_position_record(Position, db, position_data)
+            if code == 200:
+                success_count += 1
+                results.append({"index": i, "success": True, "data": payload})
+            else:
+                error_count += 1
+                results.append({"index": i, "success": False, "error": payload})
+        except Exception as e:
+            error_count += 1
+            results.append({"index": i, "success": False, "error": {"message": str(e)}})
+    
+    return jsonify({
+        "success_count": success_count,
+        "error_count": error_count,
+        "total": len(positions_data),
+        "results": results
+    }), 200
+
+@positions_bp.route("/positions/from-binance", methods=["POST"])
+def sync_from_binance():
+    """从币安同步持仓数据到本地数据库"""
+    data = request.get_json(silent=True) or {}
+    
+    # 获取可选参数
+    clear_existing = data.get("clearExisting", False)  # 是否清空现有数据
+    filter_zero = data.get("filterZero", True)  # 是否过滤零持仓
+    
+    try:
+        # 尝试导入币安API
+        try:
+            from binance.api import API
+        except ImportError:
+            return jsonify({
+                "error": "币安API模块未安装",
+                "suggestion": "请检查vendor目录中的binance模块"
+            }), 500
+        
+        # 获取环境变量中的 API 密钥
+        api_key = os.environ.get("BINANCE_API_KEY")
+        api_secret = os.environ.get("BINANCE_API_SECRET")
+        
+        if not api_key or not api_secret:
+            return jsonify({
+                "error": "缺少 BINANCE_API_KEY 或 BINANCE_API_SECRET 环境变量"
+            }), 400
+        
+        # 创建 API 连接
+        api = API(
+            api_key=api_key, 
+            api_secret=api_secret, 
+            base_url="https://fapi.binance.com",
+            timeout=30
+        )
+        
+        # 获取币安持仓信息
+        binance_positions = api.sign_request("GET", "/fapi/v2/positionRisk")
+        
+        if not isinstance(binance_positions, list):
+            return jsonify({"error": "币安API返回数据格式错误"}), 500
+        
+        # 过滤零持仓
+        active_positions = []
+        if filter_zero:
+            for pos in binance_positions:
+                if isinstance(pos, dict) and float(pos.get("positionAmt", 0)) != 0:
+                    active_positions.append(pos)
+        else:
+            active_positions = binance_positions
+        
+        # 清空现有数据（如果需要）
+        if clear_existing:
+            Position.query.delete()
+            db.session.commit()
+        
+        # 转换币安数据为本地格式并保存
+        success_count = 0
+        error_count = 0
+        errors = []
+        
+        for binance_pos in active_positions:
+            try:
+                # 映射币安数据到 ContractPosition 格式
+                position_data = {
+                    "symbol": binance_pos.get("symbol"),
+                    "entryPrice": binance_pos.get("entryPrice"),
+                    "markPrice": binance_pos.get("markPrice"),
+                    "unRealizedProfit": binance_pos.get("unRealizedProfit"),
+                    "liquidationPrice": binance_pos.get("liquidationPrice") if binance_pos.get("liquidationPrice") != "0" else None,
+                    "breakEvenPrice": binance_pos.get("breakEvenPrice") if binance_pos.get("breakEvenPrice") else None,
+                    "leverage": binance_pos.get("leverage"),
+                    "positionAmt": binance_pos.get("positionAmt"),
+                    "positionSide": "LONG" if float(binance_pos.get("positionAmt", 0)) > 0 else "SHORT",
+                    "updateTime": int(binance_pos.get("updateTime", time.time() * 1000))
+                }
+                
+                # 生成唯一ID
+                position_data["id"] = f"binance-{binance_pos.get('symbol')}-{int(time.time() * 1000)}"
+                
+                payload, code = create_position_record(Position, db, position_data)
+                if code == 200:
+                    success_count += 1
+                else:
+                    error_count += 1
+                    errors.append({
+                        "symbol": position_data.get("symbol"),
+                        "error": payload
+                    })
+                    
+            except Exception as e:
+                error_count += 1
+                errors.append({
+                    "symbol": binance_pos.get("symbol", "unknown"),
+                    "error": str(e)
+                })
+        
+        return jsonify({
+            "message": "同步完成",
+            "total_binance_positions": len(binance_positions),
+            "active_positions": len(active_positions),
+            "success_count": success_count,
+            "error_count": error_count,
+            "errors": errors[:10] if errors else [],  # 最多返回前10个错误
+            "cleared_existing": clear_existing
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "error": f"同步失败: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500
 
 @positions_bp.route("/positions/<string:entry_id>", methods=["PUT", "PATCH"])
 def update_position(entry_id):
