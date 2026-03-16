@@ -1,6 +1,6 @@
 .venv/
 vendor/
-.env/
+.env
 __pycache__/
 
 # Debug tools generated files
