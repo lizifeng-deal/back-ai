@@ -151,7 +151,8 @@ def sync_from_binance():
                     "leverage": binance_pos.get("leverage"),
                     "positionAmt": binance_pos.get("positionAmt"),
                     "positionSide": "LONG" if float(binance_pos.get("positionAmt", 0)) > 0 else "SHORT",
-                    "updateTime": int(binance_pos.get("updateTime", time.time() * 1000))
+                    "updateTime": int(binance_pos.get("updateTime", time.time() * 1000)),
+                    "currency": "USDT"  # 币安合约默认使用 USDT 计价
                 }
                 
                 # 生成唯一ID

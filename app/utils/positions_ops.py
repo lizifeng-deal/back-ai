@@ -21,10 +21,9 @@ def create_position_record(Position, db, data):
     # 生成或使用提供的ID
     entry_id = data.get("id") or ("pos-" + uuid.uuid4().hex[:12])
     
-    # 验证必需字段
-    required_fields = ["symbol", "entryPrice", "markPrice", "unRealizedProfit", 
+    # 验证必需字段（unRealizedProfit 将自动计算，不需要用户提供）
+    required_fields = ["symbol", "entryPrice", "markPrice", 
                       "leverage", "positionAmt", "positionSide"]
-    
     for field in required_fields:
         if field not in data or data[field] is None:
             return {"error": f"missing_field_{field}"}, 400
@@ -35,7 +34,7 @@ def create_position_record(Position, db, data):
         return {"error": "invalid_position_side", "allowed": ["LONG", "SHORT"]}, 400
     
     # 验证数值字段格式（确保可以作为字符串存储）
-    price_fields = ["entryPrice", "markPrice", "unRealizedProfit", "positionAmt"]
+    price_fields = ["entryPrice", "markPrice", "positionAmt"]
     optional_price_fields = ["liquidationPrice", "breakEvenPrice"]
     
     def validate_price_field(field_name, value, required=True):
@@ -61,6 +60,18 @@ def create_position_record(Position, db, data):
         for field in optional_price_fields:
             validated_data[field] = validate_price_field(field, data.get(field), required=False)
         
+        # 计算未实现盈亏
+        entry_price = float(validated_data["entryPrice"])
+        mark_price = float(validated_data["markPrice"])
+        position_amt = float(validated_data["positionAmt"])
+        
+        if position_side == "LONG":
+            unrealized_profit = (mark_price - entry_price) * position_amt
+        else:  # SHORT
+            unrealized_profit = (entry_price - mark_price) * position_amt
+        
+        validated_data["unRealizedProfit"] = str(unrealized_profit)
+        
         # 验证杠杆倍数
         leverage = data.get("leverage")
         if leverage is not None:
@@ -76,6 +87,9 @@ def create_position_record(Position, db, data):
     if update_time is None:
         update_time = int(time.time() * 1000)  # 当前时间戳（毫秒）
     
+    # 获取货币类型（默认为USDT）
+    currency = data.get("currency", "USDT")
+    
     # 创建持仓记录
     row = Position(
         id=entry_id,
@@ -83,12 +97,13 @@ def create_position_record(Position, db, data):
         entry_price=validated_data["entryPrice"],
         mark_price=validated_data["markPrice"],
         unrealized_profit=validated_data["unRealizedProfit"],
-        liquidation_price=validated_data["liquidationPrice"],
-        break_even_price=validated_data["breakEvenPrice"],
+        liquidation_price=validated_data.get("liquidationPrice"),
+        break_even_price=validated_data.get("breakEvenPrice"),
         leverage=validated_data["leverage"],
         position_amt=validated_data["positionAmt"],
         position_side=position_side,
-        update_time=update_time
+        update_time=update_time,
+        currency=currency
     )
     
     db.session.add(row)
@@ -130,10 +145,27 @@ def update_position_record(Position, db, entry_id, data):
         # 更新价格相关字段
         validate_and_update_price_field("entryPrice", "entry_price")
         validate_and_update_price_field("markPrice", "mark_price")
-        validate_and_update_price_field("unRealizedProfit", "unrealized_profit")
         validate_and_update_price_field("liquidationPrice", "liquidation_price")
         validate_and_update_price_field("breakEvenPrice", "break_even_price")
         validate_and_update_price_field("positionAmt", "position_amt")
+        
+        # 如果更新了影响盈亏计算的字段，重新计算 unRealizedProfit
+        if any(field in data for field in ["entryPrice", "markPrice", "positionAmt", "positionSide"]):
+            entry_price = float(row.entry_price)
+            mark_price = float(row.mark_price)
+            position_amt = float(row.position_amt)
+            position_side = row.position_side
+            
+            if position_side == "LONG":
+                unrealized_profit = (mark_price - entry_price) * position_amt
+            else:  # SHORT
+                unrealized_profit = (entry_price - mark_price) * position_amt
+            
+            row.unrealized_profit = str(unrealized_profit)
+        
+        # 如果用户手动提供了 unRealizedProfit，则使用用户提供的值（覆盖自动计算）
+        if "unRealizedProfit" in data:
+            validate_and_update_price_field("unRealizedProfit", "unrealized_profit")
         
         # 更新杠杆倍数
         if "leverage" in data:
@@ -156,6 +188,10 @@ def update_position_record(Position, db, entry_id, data):
     else:
         # 如果没有提供新的时间戳，使用当前时间
         row.update_time = int(time.time() * 1000)
+    
+    # 更新货币类型
+    if "currency" in data:
+        row.currency = data["currency"] or "USDT"
     
     db.session.commit()
     return row.to_dict(), 200

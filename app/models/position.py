@@ -30,6 +30,9 @@ class Position(db.Model):
     # 时间戳
     update_time = db.Column(db.BigInteger, nullable=False, comment="数据更新时间戳（毫秒）")
     
+    # 币种信息
+    currency = db.Column(db.String(16), nullable=False, default="USDT", comment="计价货币")
+    
     # 创建和修改时间
     created_at = db.Column(db.DateTime, default=datetime.utcnow, comment="记录创建时间")
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="记录更新时间")
@@ -48,6 +51,7 @@ class Position(db.Model):
             "positionAmt": self.position_amt,
             "positionSide": self.position_side,
             "updateTime": self.update_time,
+            "currency": self.currency,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
             "updatedAt": self.updated_at.isoformat() if self.updated_at else None
         }
