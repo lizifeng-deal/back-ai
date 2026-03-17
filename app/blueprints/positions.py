@@ -133,45 +133,74 @@ def sync_from_binance():
             Position.query.delete()
             db.session.commit()
         
-        # 转换币安数据为本地格式并保存
+        # 转换币安数据为本地格式并保存 (使用upsert逻辑)
         success_count = 0
         error_count = 0
+        updated_count = 0
+        created_count = 0
         errors = []
         
         for binance_pos in active_positions:
             try:
+                symbol = binance_pos.get("symbol")
+                position_amt = float(binance_pos.get("positionAmt", 0))
+                position_side = "LONG" if position_amt > 0 else "SHORT"
+                
                 # 映射币安数据到 ContractPosition 格式
                 position_data = {
-                    "symbol": binance_pos.get("symbol"),
+                    "symbol": symbol,
                     "entryPrice": binance_pos.get("entryPrice"),
                     "markPrice": binance_pos.get("markPrice"),
-                    "unRealizedProfit": binance_pos.get("unRealizedProfit"),
                     "liquidationPrice": binance_pos.get("liquidationPrice") if binance_pos.get("liquidationPrice") != "0" else None,
                     "breakEvenPrice": binance_pos.get("breakEvenPrice") if binance_pos.get("breakEvenPrice") else None,
                     "leverage": binance_pos.get("leverage"),
                     "positionAmt": binance_pos.get("positionAmt"),
-                    "positionSide": "LONG" if float(binance_pos.get("positionAmt", 0)) > 0 else "SHORT",
+                    "positionSide": position_side,
                     "updateTime": int(binance_pos.get("updateTime", time.time() * 1000)),
                     "currency": "USDT"  # 币安合约默认使用 USDT 计价
                 }
                 
-                # 生成唯一ID
-                position_data["id"] = f"binance-{binance_pos.get('symbol')}-{int(time.time() * 1000)}"
+                # 查找是否已存在相同合约的记录（基于symbol和positionSide）
+                existing_record = Position.query.filter_by(
+                    symbol=symbol, 
+                    position_side=position_side
+                ).filter(
+                    Position.id.like("binance-%")  # 只查找币安同步的记录
+                ).first()
                 
-                payload, code = create_position_record(Position, db, position_data)
-                if code == 200:
-                    success_count += 1
+                if existing_record:
+                    # 更新现有记录
+                    payload, code = update_position_record(Position, db, existing_record.id, position_data)
+                    if code == 200:
+                        updated_count += 1
+                        success_count += 1
+                    else:
+                        error_count += 1
+                        errors.append({
+                            "symbol": symbol,
+                            "action": "update",
+                            "error": payload
+                        })
                 else:
-                    error_count += 1
-                    errors.append({
-                        "symbol": position_data.get("symbol"),
-                        "error": payload
-                    })
+                    # 创建新记录
+                    position_data["id"] = f"binance-{symbol}-{position_side}-{int(time.time() * 1000)}"
+                    payload, code = create_position_record(Position, db, position_data)
+                    if code == 200:
+                        created_count += 1
+                        success_count += 1
+                    else:
+                        error_count += 1
+                        errors.append({
+                            "symbol": symbol,
+                            "action": "create",
+                            "error": payload
+                        })
                     
             except Exception as e:
                 error_count += 1
                 errors.append({
                     "symbol": binance_pos.get("symbol", "unknown"),
+                    "action": "process",
                     "error": str(e)
                 })
         
@@ -180,9 +209,12 @@ def sync_from_binance():
             "total_binance_positions": len(binance_positions),
             "active_positions": len(active_positions),
             "success_count": success_count,
+            "created_count": created_count,
+            "updated_count": updated_count,
             "error_count": error_count,
             "errors": errors[:10] if errors else [],  # 最多返回前10个错误
-            "cleared_existing": clear_existing
+            "cleared_existing": clear_existing,
+            "strategy": "upsert (存在则更新，不存在则创建)"
         }), 200
         
     except Exception as e:

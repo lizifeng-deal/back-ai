@@ -65,10 +65,13 @@ def create_position_record(Position, db, data):
         mark_price = float(validated_data["markPrice"])
         position_amt = float(validated_data["positionAmt"])
         
+        # 使用持仓数量的绝对值进行计算
+        abs_position_amt = abs(position_amt)
+        
         if position_side == "LONG":
-            unrealized_profit = (mark_price - entry_price) * position_amt
+            unrealized_profit = (mark_price - entry_price) * abs_position_amt
         else:  # SHORT
-            unrealized_profit = (entry_price - mark_price) * position_amt
+            unrealized_profit = (entry_price - mark_price) * abs_position_amt
         
         validated_data["unRealizedProfit"] = str(unrealized_profit)
         
@@ -156,10 +159,13 @@ def update_position_record(Position, db, entry_id, data):
             position_amt = float(row.position_amt)
             position_side = row.position_side
             
+            # 使用持仓数量的绝对值进行计算
+            abs_position_amt = abs(position_amt)
+            
             if position_side == "LONG":
-                unrealized_profit = (mark_price - entry_price) * position_amt
+                unrealized_profit = (mark_price - entry_price) * abs_position_amt
             else:  # SHORT
-                unrealized_profit = (entry_price - mark_price) * position_amt
+                unrealized_profit = (entry_price - mark_price) * abs_position_amt
             
             row.unrealized_profit = str(unrealized_profit)
         
